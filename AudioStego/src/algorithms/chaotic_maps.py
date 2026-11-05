@@ -10,7 +10,7 @@ def _validate_matrix(matrix: np.ndarray) -> np.ndarray:
     return arr
 
 
-def arnold_cat_map(matrix: np.ndarray, p: int = 1, q: int = 1, iterations: int = 10) -> np.ndarray:
+def arnold_cat_map(matrix: np.ndarray, p: int = 1, q: int = 1, iterations: int = 8) -> np.ndarray:
     """Apply Arnold Cat Map to a square matrix."""
     arr = _validate_matrix(matrix)
     n = arr.shape[0]
@@ -30,7 +30,7 @@ def arnold_cat_map(matrix: np.ndarray, p: int = 1, q: int = 1, iterations: int =
     return transformed
 
 
-def inverse_arnold_cat_map(matrix: np.ndarray, p: int = 1, q: int = 1, iterations: int = 10) -> np.ndarray:
+def inverse_arnold_cat_map(matrix: np.ndarray, p: int = 1, q: int = 1, iterations: int = 8) -> np.ndarray:
     """Reverse Arnold Cat Map transform using the true modular inverse of the forward matrix."""
     arr = _validate_matrix(matrix)
     if arr.shape[0] != arr.shape[1]:
@@ -121,7 +121,7 @@ def hybrid_chaotic_encryption(
     matrix: np.ndarray,
     p: int = 1,
     q: int = 1,
-    iterations: int = 10,
+    iterations: int = 8,
     key_vector: list[int] | np.ndarray | None = None,
 ) -> np.ndarray:
     """Sequential Arnold + Baker chaotic encryption."""
@@ -136,7 +136,7 @@ def inverse_hybrid_chaotic_encryption(
     matrix: np.ndarray,
     p: int = 1,
     q: int = 1,
-    iterations: int = 10,
+    iterations: int = 8,
     key_vector: list[int] | np.ndarray | None = None,
 ) -> np.ndarray:
     """Reverse hybrid encryption in the reverse pipeline order."""

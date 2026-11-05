@@ -415,7 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
     encrypt_parser.add_argument("-i", "--iterations", type=int, default=8, help="Number of chaotic iterations.")
     encrypt_parser.add_argument("-k", "--key-vector", default="8,8,8,8,8,8,8,8", help="Comma-separated key vector for Baker or hybrid maps.")
     encrypt_parser.add_argument("-a", "--alpha", type=float, default=0.08, help="Embedding strength factor in audio domain.")
-    encrypt_parser.add_argument("--dwt-level", type=int, default=4, help="DWT depth used for coefficient embedding (4 or 6 are typical).")
+    encrypt_parser.add_argument("-d", "--dwt-level", type=int, default=4, help="DWT depth used for coefficient embedding (4 or 6 are typical).")
 
     decrypt_parser = subparsers.add_parser(
         "decrypt",
@@ -430,7 +430,7 @@ def _build_parser() -> argparse.ArgumentParser:
     decrypt_parser.add_argument("-q", "--q", type=int, default=1, help="Arnold map parameter q.")
     decrypt_parser.add_argument("-i", "--iterations", type=int, default=8, help="Number of chaotic iterations.")
     decrypt_parser.add_argument("-k", "--key-vector", default="8,8,8,8,8,8,8,8", help="Comma-separated key vector for Baker or hybrid maps.")
-    decrypt_parser.add_argument("--dwt-level", type=int, default=4, help="DWT depth used for coefficient extraction (4 or 6 are typical).")
+    decrypt_parser.add_argument("-d", "--dwt-level", type=int, default=4, help="DWT depth used for coefficient extraction (4 or 6 are typical).")
 
     return parser
 
