@@ -44,6 +44,109 @@ except ImportError:  # pragma: no cover
     from core.metrics import mse, psnr, ssim
 
 
+def prepare_symmetric_payload(payload_bits: np.ndarray) -> np.ndarray:
+    """Reorder a payload into a symmetric signal-friendly layout."""
+    bits = np.asarray(payload_bits, dtype=np.float64).reshape(-1)
+    if bits.size == 0:
+        return bits.copy()
+    if bits.size % 2 != 0:
+        bits = np.pad(bits, (0, 1), mode="constant", constant_values=0.0)
+    left = bits[0::2]
+    right = bits[1::2][::-1]
+    return np.concatenate([left, right]).astype(np.float64)
+
+
+def restore_symmetric_payload(payload_bits: np.ndarray) -> np.ndarray:
+    """Undo the symmetric payload layout used before DWT embedding."""
+    bits = np.asarray(payload_bits, dtype=np.float64).reshape(-1)
+    if bits.size == 0:
+        return bits.copy()
+    if bits.size % 2 != 0:
+        bits = bits[:-1]
+    half = bits.size // 2
+    rebuilt = np.empty(bits.size, dtype=np.float64)
+    rebuilt[0::2] = bits[:half]
+    rebuilt[1::2] = bits[half:][::-1]
+    return rebuilt.astype(np.float64)
+
+
+def _flatten_detail_coefficients(coefficients: list[np.ndarray]) -> np.ndarray:
+    """Flatten all DWT detail bands into a single vector."""
+    if len(coefficients) <= 1:
+        return np.asarray([], dtype=np.float64)
+    flattened = [np.asarray(coeff, dtype=np.float64).reshape(-1) for coeff in coefficients[1:]]
+    return np.concatenate(flattened, axis=0) if flattened else np.asarray([], dtype=np.float64)
+
+
+def dwt_embed_payload(cover_signal: np.ndarray, payload_bits: np.ndarray, wavelet: str = "db4", alpha: float = 0.2, level: int = 4) -> np.ndarray:
+    """Embed bits into the stable leading coefficients of the highest-frequency DWT detail band."""
+    cover = np.asarray(cover_signal, dtype=np.float64).reshape(-1)
+    payload = np.asarray(payload_bits, dtype=np.float64).reshape(-1)
+    if cover.size == 0:
+        raise ValueError("Sygnał cover nie może być pusty.")
+    if payload.size == 0:
+        raise ValueError("Payload nie może być pusty.")
+    if not 0.0 < alpha <= 1.0:
+        raise ValueError("alpha musi być w zakresie (0, 1].")
+
+    max_level = pywt.dwt_max_level(cover.size, pywt.Wavelet(wavelet).dec_len)
+    actual_level = min(level, max_level) if max_level > 0 else 0
+    if actual_level <= 0:
+        raise ValueError(f"Sygnał jest zbyt krótki dla wavelet {wavelet!r} przy poziomie {level}.")
+
+    coeffs = pywt.wavedec(cover, wavelet, level=actual_level)
+    if len(coeffs) <= 1:
+        raise ValueError(f"DWT dla {wavelet!r} nie zwróciła wystarczającej liczby współczynników przy poziomie {actual_level}.")
+
+    detail_band = np.asarray(coeffs[-1], dtype=np.float64).reshape(-1)
+    if payload.size > detail_band.size:
+        raise ValueError(f"Pojemność najwyższego pasma DWT za mała: potrzeba {payload.size} bitów, dostępne {detail_band.size} przy level={actual_level}.")
+
+    modified = detail_band.copy()
+    payload_count = min(payload.size, detail_band.size)
+    carrier = detail_band[:payload_count]
+    base_scale = float(np.median(np.abs(carrier))) if carrier.size > 0 else 1.0
+    base_scale = max(base_scale, 1e-6)
+    offset = alpha * base_scale
+
+    for i in range(payload_count):
+        bit = payload[i]
+        magnitude = abs(detail_band[i]) + offset
+        modified[i] = magnitude if float(bit) >= 0.5 else -magnitude
+
+    rebuilt = [np.asarray(coeffs[0], dtype=np.float64)]
+    for coeff in coeffs[1:-1]:
+        rebuilt.append(np.asarray(coeff, dtype=np.float64))
+    rebuilt.append(modified.reshape(coeffs[-1].shape))
+    return np.asarray(pywt.waverec(rebuilt, wavelet), dtype=np.float64)
+
+
+def dwt_extract_payload(stego_signal: np.ndarray, wavelet: str = "db4", level: int = 4, max_bits: int | None = None) -> np.ndarray:
+    """Read bits from the stable leading coefficients of the highest-frequency DWT detail band."""
+    stego = np.asarray(stego_signal, dtype=np.float64).reshape(-1)
+    if stego.size == 0:
+        return np.asarray([], dtype=np.float64)
+
+    max_level = pywt.dwt_max_level(stego.size, pywt.Wavelet(wavelet).dec_len)
+    actual_level = min(level, max_level) if max_level > 0 else 0
+    if actual_level <= 0:
+        return np.asarray([], dtype=np.float64)
+
+    coeffs = pywt.wavedec(stego, wavelet, level=actual_level)
+    if len(coeffs) <= 1:
+        return np.asarray([], dtype=np.float64)
+
+    detail_band = np.asarray(coeffs[-1], dtype=np.float64).reshape(-1)
+    count = detail_band.size if max_bits is None else min(int(max_bits), detail_band.size)
+    if count <= 0:
+        return np.asarray([], dtype=np.float64)
+
+    bits = np.empty(count, dtype=np.float64)
+    for i in range(count):
+        bits[i] = 1.0 if detail_band[i] >= 0.0 else 0.0
+    return bits
+
+
 class ChaoticAudioStego:
     """Image encryption and audio steganography pipeline powered by chaotic maps."""
 
@@ -98,11 +201,11 @@ class ChaoticAudioStego:
 
     @staticmethod
     def image_to_audio_like_signal(matrix: np.ndarray, sample_rate: int = 44100) -> np.ndarray:
-        """Convert the encrypted matrix into a binary payload bitstream for embedding."""
+        """Convert the encrypted matrix into a symmetric binary payload stream for DWT embedding."""
         arr = np.asarray(matrix, dtype=np.uint8)
         flat = arr.reshape(-1)
-        bits = np.unpackbits(flat.astype(np.uint8))
-        return bits.astype(np.float64)
+        bits = np.unpackbits(flat.astype(np.uint8)).astype(np.float64)
+        return prepare_symmetric_payload(bits)
 
     @staticmethod
     def _encode_length_header(length: int) -> np.ndarray:
@@ -125,8 +228,8 @@ class ChaoticAudioStego:
         return int(value)
 
     @staticmethod
-    def embed_payload_in_audio(cover_audio: np.ndarray, payload_signal: np.ndarray, alpha: float = 0.08, wavelet: str = "db4") -> np.ndarray:
-        """Embed the payload in the cover audio using a stable LSB bitstream layout."""
+    def embed_payload_in_audio(cover_audio: np.ndarray, payload_signal: np.ndarray, alpha: float = 0.2, wavelet: str = "db4", level: int = 4) -> np.ndarray:
+        """Embed the payload into the high-frequency DWT coefficients of the cover audio."""
         if not 0.0 < alpha <= 1.0:
             raise ValueError("alpha musi być w zakresie (0, 1].")
 
@@ -138,44 +241,36 @@ class ChaoticAudioStego:
         header = ChaoticAudioStego._encode_length_header(payload.size)
         data = np.concatenate([header, payload], axis=0)
 
-        cover_pcm = np.rint(np.clip(cover * 32767.0, -32768, 32767)).astype(np.int32)
-        capacity = cover_pcm.size
-        if data.size > capacity:
-            raise ValueError(f"Pojemność audio za mała. Potrzebne: {data.size}, dostępne: {capacity}.")
-
-        stego_pcm = cover_pcm.copy()
-        for i, bit in enumerate(data):
-            bit_val = int(np.round(float(bit)))
-            stego_pcm[i] = (stego_pcm[i] & ~1) | bit_val
-
-        return stego_pcm.astype(np.int16)
+        stego_signal = dwt_embed_payload(cover, data, wavelet=wavelet, alpha=alpha, level=level)
+        return np.asarray(stego_signal, dtype=np.float64)
 
     @staticmethod
-    def extract_payload_from_audio(stego_audio: np.ndarray, wavelet: str = "db4") -> np.ndarray:
-        """Extract the binary payload from the stego audio using the same bitstream layout."""
+    def extract_payload_from_audio(stego_audio: np.ndarray, wavelet: str = "db4", level: int = 4) -> np.ndarray:
+        """Extract the binary payload from the high-frequency DWT coefficients of the stego audio."""
         samples = np.asarray(stego_audio, dtype=np.float64).reshape(-1)
         if samples.size < 32:
             raise ValueError("Nagranie stego jest zbyt krótkie, aby zawierać nagłówek długości payloadu.")
 
-        if np.asarray(stego_audio).dtype.kind in {"i", "u"}:
-            pcm = np.asarray(stego_audio, dtype=np.int32).reshape(-1)
-        else:
-            pcm = np.rint(np.clip(samples * 32767.0, -32768, 32767)).astype(np.int32)
+        bits = dwt_extract_payload(samples, wavelet=wavelet, level=level)
+        if bits.size < 32:
+            raise ValueError("Nie odzyskano wystarczającej liczby bitów z DWT stego-audio.")
 
-        header_bits = (pcm[:32] & 1).astype(np.float64)
+        header_bits = bits[:32]
         length = ChaoticAudioStego._decode_length_header(header_bits)
         if length <= 0:
             return np.empty(0, dtype=np.float64)
 
-        payload_end = min(32 + length, pcm.size)
-        payload_bits = (pcm[32:payload_end] & 1).astype(np.float64)
+        payload_end = min(32 + length, bits.size)
+        payload_bits = bits[32:payload_end]
         if payload_bits.size < length:
             raise ValueError(f"Payload nie został w pełni odzyskany: oczekiwano {length}, odzyskano {payload_bits.size}.")
-        full_bits = np.concatenate([header_bits, payload_bits[:length]], axis=0)
+
+        restored_payload = restore_symmetric_payload(payload_bits[:length])
+        full_bits = np.concatenate([header_bits, restored_payload], axis=0)
         return full_bits.astype(np.float64)
 
     @staticmethod
-    def embed_image_into_audio(cover_audio_path: str | Path, secret_image_path: str | Path, output_path: str | Path, map_type: str = "hybrid", p: int = 1, q: int = 1, iterations: int = 10, key_vector: Optional[list[int] | np.ndarray] = None, alpha: float = 0.08) -> dict:
+    def embed_image_into_audio(cover_audio_path: str | Path, secret_image_path: str | Path, output_path: str | Path, map_type: str = "hybrid", p: int = 1, q: int = 1, iterations: int = 10, key_vector: Optional[list[int] | np.ndarray] = None, alpha: float = 0.2, dwt_level: int = 4) -> dict:
         """Encrypt an image, transform it into an audio-like signal, and embed it into a cover audio file."""
         print("[1/6] Ładowanie obrazu tajnego...")
         secret_matrix = ChaoticAudioStego.prepare_secret_image(secret_image_path)
@@ -191,7 +286,7 @@ class ChaoticAudioStego:
         cover_audio, sample_rate = load_audio(cover_audio_path)
 
         print("[5/6] Osadzanie danych w wysokich częstotliwościach DWT...")
-        stego_audio = ChaoticAudioStego.embed_payload_in_audio(cover_audio, payload_signal, alpha=alpha)
+        stego_audio = ChaoticAudioStego.embed_payload_in_audio(cover_audio, payload_signal, alpha=alpha, level=dwt_level)
         save_audio(output_path, stego_audio, sample_rate)
 
         print("[6/6] Zakończono pipeline osadzania.")
@@ -204,13 +299,13 @@ class ChaoticAudioStego:
         }
 
     @staticmethod
-    def extract_image_from_audio(stego_audio_path: str | Path, restored_output_path: str | Path, map_type: str = "hybrid", p: int = 1, q: int = 1, iterations: int = 10, key_vector: Optional[list[int] | np.ndarray] = None, wavelet: str = "db4") -> np.ndarray:
+    def extract_image_from_audio(stego_audio_path: str | Path, restored_output_path: str | Path, map_type: str = "hybrid", p: int = 1, q: int = 1, iterations: int = 10, key_vector: Optional[list[int] | np.ndarray] = None, wavelet: str = "db4", dwt_level: int = 4) -> np.ndarray:
         """Extract the embedded image signal from the stego audio and reverse the encryption."""
         print("[1/4] Wczytanie stego-audio...")
         stego_audio, sample_rate = load_audio(stego_audio_path)
 
         print("[2/4] Ekstrakcja payloadu z cech DWT...")
-        payload_bits = ChaoticAudioStego.extract_payload_from_audio(stego_audio, wavelet=wavelet)
+        payload_bits = ChaoticAudioStego.extract_payload_from_audio(stego_audio, wavelet=wavelet, level=dwt_level)
         if payload_bits.size == 0:
             raise ValueError("Nie znaleziono ukrytej informacji w pliku stego-audio.")
 
@@ -236,6 +331,8 @@ class ChaoticAudioStego:
             raise ValueError(f"Wielkość odzyskanego obrazu jest niepoprawna: {values.size}")
 
         matrix = values.reshape(size, size)
+        if matrix.shape != (size, size):
+            raise ValueError(f"Nagłówek i payload nie dają kwadratowego obrazu: {matrix.shape}")
         recovered = ChaoticAudioStego.decrypt_image(matrix, map_type=map_type, p=p, q=q, iterations=iterations, key_vector=key_vector)
         recovered = np.clip(recovered, 0, 255)
 
@@ -318,6 +415,7 @@ def _build_parser() -> argparse.ArgumentParser:
     encrypt_parser.add_argument("-i", "--iterations", type=int, default=8, help="Number of chaotic iterations.")
     encrypt_parser.add_argument("-k", "--key-vector", default="8,8,8,8,8,8,8,8", help="Comma-separated key vector for Baker or hybrid maps.")
     encrypt_parser.add_argument("-a", "--alpha", type=float, default=0.08, help="Embedding strength factor in audio domain.")
+    encrypt_parser.add_argument("--dwt-level", type=int, default=4, help="DWT depth used for coefficient embedding (4 or 6 are typical).")
 
     decrypt_parser = subparsers.add_parser(
         "decrypt",
@@ -332,6 +430,7 @@ def _build_parser() -> argparse.ArgumentParser:
     decrypt_parser.add_argument("-q", "--q", type=int, default=1, help="Arnold map parameter q.")
     decrypt_parser.add_argument("-i", "--iterations", type=int, default=8, help="Number of chaotic iterations.")
     decrypt_parser.add_argument("-k", "--key-vector", default="8,8,8,8,8,8,8,8", help="Comma-separated key vector for Baker or hybrid maps.")
+    decrypt_parser.add_argument("--dwt-level", type=int, default=4, help="DWT depth used for coefficient extraction (4 or 6 are typical).")
 
     return parser
 
@@ -352,6 +451,7 @@ def _run_encrypt(args: argparse.Namespace) -> int:
         iterations=args.iterations,
         key_vector=key_vector,
         alpha=args.alpha,
+        dwt_level=args.dwt_level,
     )
 
     print("\n[OK] Encryption finished.")
@@ -377,6 +477,7 @@ def _run_decrypt(args: argparse.Namespace) -> int:
         q=args.q,
         iterations=args.iterations,
         key_vector=key_vector,
+        dwt_level=args.dwt_level,
     )
 
     print("\n[OK] Decryption finished.")
