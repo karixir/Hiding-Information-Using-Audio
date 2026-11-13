@@ -107,6 +107,47 @@ python AudioStego/src/algorithms/alg2_chmap.py decrypt \
 - `baker` — mapa Baker,
 - `hybrid` — łączenie Arnold + Baker.
 
+## Jak używać alg5_stegibiza
+
+Algorytm koduje tekst w alfabet Morse'a i ukrywa symbole przez skracanie lub
+wydłużanie kolejnych fragmentów audio. Przy ekstrakcji z rzeczywistych utworów
+podaj ten sam, niezmieniony plik cover (`-c`): naturalne transjenty i zmiany
+rytmu nie pozwalają wiarygodnie odtworzyć granic fragmentów wyłącznie na
+podstawie BPM. Podaj też te same wartości BPM, `delta-bpm` i `phi`, co przy
+osadzaniu, oraz liczbę symboli strumienia StegIbiza. Jeżeli plik stego nazywa
+się `<cover>_stegibiza.wav` i leży obok pliku cover, oryginał zostanie wykryty
+automatycznie; w pozostałych przypadkach podaj go przez `-c`.
+
+```bash
+python AudioStego/src/algorithms/alg5_stegibiza.py embed \
+  -c assets/cover.wav \
+  -m "steganography is a dancer!" \
+  -o assets/cover_stegibiza.wav \
+  --bpm 128 \
+  --delta-bpm 1 \
+  --phi 1
+```
+
+Jeśli pominięto `-o`, wynik zostanie zapisany obok pliku cover jako
+`<nazwa>_stegibiza.wav`. Liczbę symboli potrzebną do ekstrakcji można wyliczyć
+w Pythonie po zaimportowaniu `StegIbiza`:
+
+```python
+from AudioStego.src.algorithms.alg5_stegibiza import StegIbiza
+
+num_symbols = len(StegIbiza.text_to_stegibiza_stream("steganography is a dancer!"))
+```
+
+```bash
+python AudioStego/src/algorithms/alg5_stegibiza.py extract \
+  -s assets/cover_stegibiza.wav \
+  -c assets/cover.wav \
+  -n 88 \
+  --bpm 128 \
+  --delta-bpm 1 \
+  --phi 1
+```
+
 ## Obsługiwane rozszerzenia plików
 
 ### Obrazy wejściowe
@@ -132,4 +173,3 @@ python AudioStego/src/algorithms/alg2_chmap.py decrypt \
 ```bash
 pip install -r requirements.txt
 ```
-
