@@ -14,7 +14,7 @@ Hiding-Information-Using-Audio/
     │   │   ├── __init__.py
     │   │   ├── alg1_lsb.py
     │   │   ├── alg2_chmap.py
-    │   │   ├── alg2_dwt.py
+    │   │   ├── alg3_dwt.py
     │   │   ├── alg4_phase.py
     │   │   ├── alg5_stegibiza.py
     │   │   ├── alg6_hybrid.py
