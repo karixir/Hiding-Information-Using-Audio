@@ -39,7 +39,7 @@ Uwaga: na ten etap rozwoju projektu moduły algorytmów są używane osobno.
 ## Jak używać alg1_lsb.py
 
 
-## Jak używać alg2_chmap
+## Jak używać alg2_chmap.py
 
 ### 1. Szyfrowanie obrazu do pliku audio
 
@@ -106,7 +106,52 @@ python AudioStego/src/algorithms/alg2_chmap.py decrypt \
 - `baker` — mapa Baker,
 - `hybrid` — łączenie Arnold + Baker.
 
-## Jak używać alg5_stegibiza
+## Jak używać alg4_phase.py
+
+Uruchamiaj polecenia z katalogu głównego repozytorium. Algorytm przyjmuje
+pliki WAV w formacie 16-bit PCM, osadza tajne audio w pierwszym kanale pliku
+cover i zachowuje pozostałe kanały bez zmian. Tajne audio jest konwertowane
+do mono, domyślnie próbkowane do 8000 Hz i kodowane jako 16-bitowe.
+Nagłówek jest osadzany w pierwszych segmentach z wystarczającą energią
+w wybranych binach; początkowa cisza jest pomijana automatycznie.
+
+### 1. Osadzanie tajnego audio
+
+```bash
+python AudioStego/src/algorithms/alg4_phase.py encode --cover AudioStego/assets/audio/NoChurchInTheWild.wav --secret path/to/secret.wav --out results/phase_stego.wav
+```
+
+Wskazanie `--secret` zastąp ścieżką do własnego pliku tajnego WAV. Zbyt duży
+payload zostanie odrzucony z informacją o brakującej pojemności. Można
+zmniejszyć go przez obniżenie szybkości próbkowania lub głębi bitowej, np.:
+
+```bash
+python AudioStego/src/algorithms/alg4_phase.py encode --cover AudioStego/assets/audio/NoChurchInTheWild.wav --secret path/to/secret.wav --out results/phase_stego.wav --secret-rate 4000 --secret-bits 8
+```
+
+### 2. Odzyskiwanie tajnego audio
+
+```bash
+python AudioStego/src/algorithms/alg4_phase.py extract --stego results/phase_stego.wav --out results/phase_recovered.wav
+```
+
+### Parametry
+
+- `--cover`, `--secret`, `--out` — plik cover, tajne audio i plik wyjściowy dla `encode`.
+- `--stego`, `--out` — plik stego i plik wyjściowy dla `extract`.
+- `--secret-rate` — docelowa częstotliwość próbkowania tajnego audio (domyślnie `8000` Hz).
+- `--secret-bits` — głębia bitowa tajnego audio po przygotowaniu: `8` albo `16` (domyślnie `16`).
+- `--segment-size`, `--bins`, `--bits-per-bin`, `--start-bin`, `--bin-stride` — parametry osadzania (domyślnie `2048`, `4`, `2`, `1`, `1`).
+- `--repetition` — powtórzenie każdego bitu dla korekcji błędów; tę samą wartość trzeba podać przy osadzaniu i ekstrakcji (domyślnie `1`). Zwiększa odporność, ale zmniejsza pojemność.
+- `--password` — opcjonalne hasło, które musi być takie samo podczas ekstrakcji. Ta wersja jedynie zaciemnia nagłówek przez XOR; nie zapewnia bezpiecznego szyfrowania.
+- `--help` — wyświetla dostępne polecenia i opcje.
+
+Przykłady powyżej nie używają hasła ani korekcji powtórzeniowej. Pełną listę
+opcji można też zobaczyć poleceniami
+`python AudioStego/src/algorithms/alg4_phase.py encode --help` i
+`python AudioStego/src/algorithms/alg4_phase.py extract --help`.
+
+## Jak używać alg5_stegibiza.py
 
 Algorytm koduje tekst w alfabet Morse'a i ukrywa symbole przez skracanie lub
 wydłużanie kolejnych fragmentów audio. Przy ekstrakcji z rzeczywistych utworów
